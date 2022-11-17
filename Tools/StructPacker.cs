@@ -1,0 +1,162 @@
+using System.Runtime.CompilerServices;
+
+namespace OpComNet.Tools;
+
+public static class StructPacker
+{
+    public static byte[] Pack(string format, params object[] values)
+    {
+        var builder = new BinaryArrayBuilder();
+        var littleEndian = true;
+        var valueCtr = 0;
+        foreach (var ch in format)
+        {
+            if (ch == '<')
+            {
+                littleEndian = true;
+            }
+            else if (ch == '>')
+            {
+                littleEndian = false;
+            }
+            else if (ch == 'x')
+            {
+                builder.AppendByte(0x00);
+            }
+            else
+            {
+                if (valueCtr >= values.Length)
+                    throw new InvalidOperationException("Provided too little values for given format string");
+
+                var (formatType, _) = GetFormatType(ch);
+                var value = Convert.ChangeType(values[valueCtr], formatType);
+                var bytes = TypeAgnosticGetBytes(value);
+                var endianFlip = littleEndian != BitConverter.IsLittleEndian;
+                if (endianFlip)
+                    bytes = (byte[])bytes.Reverse();
+
+                builder.AppendBytes(bytes);
+
+                valueCtr++;
+            }
+        }
+
+        return builder.ToArray();
+    }
+
+    public static T Unpack<T>(string format, byte[] data)
+        where T : ITuple
+    {
+        List<object> resultingValues = new List<object>();
+        var littleEndian = true;
+        var valueCtr = 0;
+        var dataIx = 0;
+        var tupleType = typeof(T);
+        foreach(var ch in format)
+        {
+            if (ch == '<')
+            {
+                littleEndian = true;
+            }
+            else if (ch == '>')
+            {
+                littleEndian = false;
+            }
+            else if (ch == 'x')
+            {
+                dataIx++;
+            }
+            else
+            {
+                if (valueCtr >= tupleType.GenericTypeArguments.Length)
+                    throw new InvalidOperationException("Provided too little tuple arguments for given format string");
+
+                var (formatType, formatSize) = GetFormatType(ch);
+
+                var valueBytes = data[dataIx..(dataIx + formatSize)];
+                var endianFlip = littleEndian != BitConverter.IsLittleEndian;
+                if (endianFlip)
+                    valueBytes = (byte[])valueBytes.Reverse();
+
+                var value = TypeAgnosticGetValue(formatType, valueBytes);
+
+                var genericType = tupleType.GenericTypeArguments[valueCtr];
+                if (genericType == typeof(bool))
+                    resultingValues.Add(value);
+                else
+                    resultingValues.Add(Convert.ChangeType(value, genericType));
+
+                valueCtr++;
+                dataIx += formatSize;
+            }
+        }
+
+        if (resultingValues.Count != tupleType.GenericTypeArguments.Length)
+            throw new InvalidOperationException("Mismatch between generic argument count and pack format");
+
+        var constructor = tupleType.GetConstructor(tupleType.GenericTypeArguments);
+        return (T)constructor!.Invoke(resultingValues.ToArray());
+    }
+
+    public static TValue UnpackSingle<TValue>(string format, byte[] data)
+    {
+        var templateTuple = new ValueTuple<TValue>(default!);
+        var unpackResult =  Unpack(templateTuple, format, data);
+        return unpackResult.Item1;
+    }
+
+    /// <summary>
+    /// Workaround for language limitations XD Couldn't call Unpack<(T value)>(format, data) in UnpackSingle
+    /// </summary>
+    private static T Unpack<T>(T _, string format, byte[] data)
+        where T : ITuple
+    {
+        return Unpack<T>(format, data);
+    }
+
+    private static (Type type, int size) GetFormatType(char formatChar)
+    {
+        return formatChar switch
+        {
+            'i' => (typeof(int), sizeof(int)),
+            'I' => (typeof(uint), sizeof(uint)),
+            'q' => (typeof(long), sizeof(long)),
+            'Q' => (typeof(ulong), sizeof(ulong)),
+            'h' => (typeof(short), sizeof(short)),
+            'H' => (typeof(ushort), sizeof(ushort)),
+            'b' => (typeof(sbyte), sizeof(sbyte)),
+            'B' => (typeof(byte), sizeof(byte)),
+            '?' => (typeof(bool), 1),
+            _ => throw new InvalidOperationException("Unknown format char"),
+        };
+    }
+
+    // We use this function to provide an easier way to type-agnostically call the GetBytes method of the BitConverter class.
+    // This means we can have much cleaner code below.
+    private static byte[] TypeAgnosticGetBytes(object o)
+    {
+        if (o is bool b) return b ? new byte[] { 0x01 } : new byte[] { 0x00 };
+        if (o is int x) return BitConverter.GetBytes(x);
+        if (o is uint x2) return BitConverter.GetBytes(x2);
+        if (o is long x3) return BitConverter.GetBytes(x3);
+        if (o is ulong x4) return BitConverter.GetBytes(x4);
+        if (o is short x5) return BitConverter.GetBytes(x5);
+        if (o is ushort x6) return BitConverter.GetBytes(x6);
+        if (o is byte || o is sbyte) return new byte[] { (byte)o };
+        throw new ArgumentException("Unsupported object type found");
+    }
+
+    private static object TypeAgnosticGetValue(Type type, byte[] data)
+    {
+        if (type == typeof(bool)) return data[0] > 0;
+        if (type == typeof(int)) return BitConverter.ToInt32(data, 0);
+        if (type == typeof(uint)) return BitConverter.ToUInt32(data, 0);
+        if (type == typeof(long)) return BitConverter.ToInt64(data, 0);
+        if (type == typeof(ulong)) return BitConverter.ToUInt64(data, 0);
+        if (type == typeof(short)) return BitConverter.ToInt16(data, 0);
+        if (type == typeof(ushort)) return BitConverter.ToUInt16(data, 0);
+        if (type == typeof(byte)) return data[0];
+        if (type == typeof(sbyte)) return (sbyte)data[0];
+        throw new ArgumentException("Unsupported object type found");
+    }
+}
