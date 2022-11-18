@@ -8,15 +8,17 @@ namespace OpComNet;
 public sealed class OpComCable : IDisposable
 {
     private bool _isoTPFix;
+    private bool _outPacketAwaiting;
+    private DateTime _packetSentTime;
+    private object _directWriteLock = new();
+    private Task _bgTask;
+    private readonly CancellationTokenSource _tokenSource = new CancellationTokenSource();
     private readonly SerialPort _port;
 
     private readonly ConcurrentQueue<CanMessage> _writeQueue;
     private readonly BlockingCollection<CanMessage> _readQueue;
     private readonly ILogger<OpComCable> _logger;
-    private bool _outPacketAwaiting;
-    private DateTime _packetSentTime;
 
-    private object _directWriteLock = new();
 
     public bool NeedRestart { get; private set; }
     public int PacketsToSend => _writeQueue.Count;
@@ -34,6 +36,7 @@ public sealed class OpComCable : IDisposable
     {
         _port.BaudRate = baudRate;
         _port.PortName = portName;
+        _port.DataReceived += (_, _) => { }; // For some reason serial port lib doesn't receive data if event is not assigned to -.-
         _port.Open();
         Thread.Sleep(100);
         if (!_port.IsOpen)
@@ -49,6 +52,12 @@ public sealed class OpComCable : IDisposable
     {
         if (_port.IsOpen)
             _port.Close();
+
+        if (_bgTask != null)
+        {
+            _tokenSource.Cancel();
+            _bgTask.Wait();
+        }
     }
 
     public void Write(byte[] data)
@@ -58,6 +67,7 @@ public sealed class OpComCable : IDisposable
         buffer.AppendBytes(data);
         buffer.AppendByte(CalculateChecksum(buffer.ToArray()));
         var message = buffer.ToArray();
+        _logger.LogDebug("--> {0}", string.Join(" ", message.Select(b => b.ToString("X2"))));
         _port.Write(message, 0, message.Length);
         while (_port.BytesToWrite > 0)
             Thread.Sleep(1);
@@ -120,6 +130,8 @@ public sealed class OpComCable : IDisposable
             default:
                 throw new InvalidOperationException("Unknown CAN bus type!");
         }
+
+        _bgTask = Task.Run(() => CANWorker(_tokenSource.Token), _tokenSource.Token);
     }
 
     private void InitSWCAN()
@@ -233,6 +245,7 @@ public sealed class OpComCable : IDisposable
                     var (pid, dataLength) = StructPacker.Unpack<(int, byte)>(">IB", readBytes[1..6]);
                     var readData = readBytes[6..(6 + dataLength)];
                     var readMsg = new CanMessage(pid, readData);
+                    _logger.LogDebug("Received CAN message {}", readMsg);
                     _readQueue.Add(readMsg, cancellationToken);
                 }
                 else if (readBytes[0] == 0xD0)
