@@ -4,6 +4,13 @@ namespace OpComNet.Tools;
 
 public static class StructPacker
 {
+    /// <summary>
+    /// Packs the values according to the provided format
+    /// </summary>
+    /// <param name="format">Format matching Python's struct.pack: https://docs.python.org/3/library/struct.html</param>
+    /// <param name="values">Values to pack</param>
+    /// <returns>Byte array containing packed values</returns>
+    /// <exception cref="InvalidOperationException">Thrown when values array doesn't have enough entries to match the format</exception>
     public static byte[] Pack(string format, params object[] values)
     {
         var builder = new BinaryArrayBuilder();
@@ -44,6 +51,13 @@ public static class StructPacker
         return builder.ToArray();
     }
 
+    /// <summary>
+    /// Unpacks data from byte array to tuple according to format provided
+    /// </summary>
+    /// <typeparam name="T">Tuple type to return values in</typeparam>
+    /// <param name="data">Bytes that should contain your values</param>
+    /// <returns>Tuple containing unpacked values</returns>
+    /// <exception cref="InvalidOperationException">Thrown when values array doesn't have enough entries to match the format</exception>
     public static T Unpack<T>(string format, byte[] data)
         where T : ITuple
     {
@@ -98,6 +112,13 @@ public static class StructPacker
         return (T)constructor!.Invoke(resultingValues.ToArray());
     }
 
+    /// <summary>
+    /// Used to unpack single value from byte array. Shorthand to not have to declare and deconstruct tuple in your code
+    /// </summary>
+    /// <typeparam name="TValue">Type of value you need</typeparam>
+    /// <param name="data">Bytes that should contain your values</param>
+    /// <returns>Value unpacked from data</returns>
+    /// <exception cref="InvalidOperationException">Thrown when values array doesn't have enough entries to match the format</exception>
     public static TValue UnpackSingle<TValue>(string format, byte[] data)
     {
         var templateTuple = new ValueTuple<TValue>(default!);
