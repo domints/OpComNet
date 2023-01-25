@@ -14,7 +14,7 @@ public static class StructPacker
     public static byte[] Pack(string format, params object[] values)
     {
         var builder = new BinaryArrayBuilder();
-        var littleEndian = true;
+        var littleEndian = BitConverter.IsLittleEndian;
         var valueCtr = 0;
         foreach (var ch in format)
         {
@@ -22,7 +22,7 @@ public static class StructPacker
             {
                 littleEndian = true;
             }
-            else if (ch == '>')
+            else if (ch == '>' || ch == '!')
             {
                 littleEndian = false;
             }
@@ -40,7 +40,7 @@ public static class StructPacker
                 var bytes = TypeAgnosticGetBytes(value);
                 var endianFlip = littleEndian != BitConverter.IsLittleEndian;
                 if (endianFlip)
-                    bytes = (byte[])bytes.Reverse();
+                    Array.Reverse(bytes);
 
                 builder.AppendBytes(bytes);
 
@@ -62,7 +62,7 @@ public static class StructPacker
         where T : ITuple
     {
         List<object> resultingValues = new List<object>();
-        var littleEndian = true;
+        var littleEndian = BitConverter.IsLittleEndian;
         var valueCtr = 0;
         var dataIx = 0;
         var tupleType = typeof(T);
@@ -72,7 +72,7 @@ public static class StructPacker
             {
                 littleEndian = true;
             }
-            else if (ch == '>')
+            else if (ch == '>' || ch == '|')
             {
                 littleEndian = false;
             }
@@ -90,7 +90,7 @@ public static class StructPacker
                 var valueBytes = data[dataIx..(dataIx + formatSize)];
                 var endianFlip = littleEndian != BitConverter.IsLittleEndian;
                 if (endianFlip)
-                    valueBytes = (byte[])valueBytes.Reverse();
+                    Array.Reverse(valueBytes);
 
                 var value = TypeAgnosticGetValue(formatType, valueBytes);
 
